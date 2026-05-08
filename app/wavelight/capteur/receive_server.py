@@ -4,7 +4,7 @@ import threading
 import time
 import re
 
-from app.wavelight.leds.leds import wavelight_blink_leds
+from app.wavelight.leds.leds import wavelight_blink_leds, turn_leds_off
 
 # Return elapsed time since given clock start time (placeholder)
 def now_internal(node_state, server_type):
@@ -163,6 +163,7 @@ def handle_start(parts, client_sock, node_state, server_type):
 
             if delay < 0:
                 print(f"[{server_type}][LED] Invalid start time: timestamp already expired.")
+                client_sock.send(b"[ERROR-START]\n")
                 return
 
             if delay > 0:
@@ -171,6 +172,9 @@ def handle_start(parts, client_sock, node_state, server_type):
                 if stop_event.wait(timeout=delay):
                     print(f"[{server_type}][LED] Start canceled before beginning wait.")
                     return
+
+            # Course officialy started. We turn both leds off
+            turn_leds_off()
 
             # Proportional waiting, based on node distance from start point
             led_delay = node_state["node_distance"] * node_state['target_duration'] / node_state["distance_total"]

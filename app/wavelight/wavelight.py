@@ -1,6 +1,7 @@
 import threading
+import time
 
-from app.wavelight.leds import leds
+from app.wavelight.capteur import healthcheck
 from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, local_server
 
 # Where the node store locally sent data
@@ -18,15 +19,10 @@ node_state = {
 
 def main():
 
-    # TODO
-    # LED INIT HERE ???
-    # TURN ON LED 1 AT RASPBERRY START TO SAY SYSTEM OK
-    # BLINK LED 2 AT RASPBERRY TO SAY A PROBLEM IS OCCURING
-    # WHEN COURSE START TURN OF ALL LEDS, WAIT FOR MY TURN TO BLINK --> ALSO CHANGE BLINK PROCESS ?
-    # WHEN COURSE END, ENABLE BACK LED 1 TO SAY SYSTEM OK
-    # MAKE BOTH LEDS BLINK WHEN SENDING MSG TO SERVER ? ([WVL-config/distance/start]?)
-
     print("[WAVELIGHT] Starting system")
+
+    # Do one-shot healthcheck
+    healthcheck.healthcheck()
 
     # A raspberry can receive data:
     #
@@ -42,7 +38,7 @@ def main():
 
     # Do not stop process until CTRL+C
     while True:
-        pass
+        time.sleep(1)
 
 
 if __name__ == "__main__":
