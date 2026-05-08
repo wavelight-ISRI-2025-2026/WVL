@@ -1,8 +1,10 @@
 import threading
 
+from app.wavelight.leds import leds
 from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, local_server
 
 # Where the node store locally sent data
+# This is set here so that thread share the same variables.
 node_state = {
     "distance_total": None,   # in meters
     "node_distance": None,    # in meters
@@ -15,6 +17,14 @@ node_state = {
 }
 
 def main():
+
+    # TODO
+    # LED INIT HERE ???
+    # TURN ON LED 1 AT RASPBERRY START TO SAY SYSTEM OK
+    # BLINK LED 2 AT RASPBERRY TO SAY A PROBLEM IS OCCURING
+    # WHEN COURSE START TURN OF ALL LEDS, WAIT FOR MY TURN TO BLINK --> ALSO CHANGE BLINK PROCESS ?
+    # WHEN COURSE END, ENABLE BACK LED 1 TO SAY SYSTEM OK
+    # MAKE BOTH LEDS BLINK WHEN SENDING MSG TO SERVER ? ([WVL-config/distance/start]?)
 
     print("[WAVELIGHT] Starting system")
 

@@ -4,6 +4,8 @@ import threading
 import time
 import re
 
+from app.wavelight.leds.leds import wavelight_blink_leds
+
 # Return elapsed time since given clock start time (placeholder)
 def now_internal(node_state, server_type):
 
@@ -170,14 +172,15 @@ def handle_start(parts, client_sock, node_state, server_type):
                     print(f"[{server_type}][LED] Start canceled before beginning wait.")
                     return
 
-            # proportionnel au node_distance
+            # Proportional waiting, based on node distance from start point
             led_delay = node_state["node_distance"] * node_state['target_duration'] / node_state["distance_total"]
-            print(f"[{server_type}][LED] Attente proportionnelle à la distance du noeud: {led_delay:.2f}s")
+            print(f"[{server_type}][LED] Proportional waiting, based on node distance from start point: {led_delay:.2f}s")
             if stop_event.wait(timeout=led_delay):
                 print(f"[{server_type}][LED] Start canceled during proportional wait.")
                 return
 
-            run_led_logic(server_type)
+            # Timeout reached. Now blinking leds...
+            wavelight_blink_leds()
 
         # Launch the new thread
         t = threading.Thread(target=task, daemon=True)
