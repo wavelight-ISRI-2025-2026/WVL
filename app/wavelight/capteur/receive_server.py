@@ -116,7 +116,7 @@ def handle_distance(parts, client_sock, node_state, server_type):
 # Parsing [WVL-start]
 def handle_start(parts, client_sock, node_state, server_type):
 
-    # Include guards
+    # Include guards
     if node_state["distance_total"] is None:
         print(f"[{server_type}][START] Total distance not defined. Please configure it using [WVL-config] header.")
         client_sock.send(b"[ERROR-START]\n")
@@ -128,7 +128,6 @@ def handle_start(parts, client_sock, node_state, server_type):
         return 1
 
     try:
-
         # Get run start timestamp
         node_state["start_time"] = datetime.fromisoformat(parts[1])
 
@@ -138,36 +137,52 @@ def handle_start(parts, client_sock, node_state, server_type):
         print(f"[{server_type}][START] start_time={node_state['start_time']}")
         print(f"[{server_type}][START] target_duration={node_state['target_duration']}")
 
-        # Acknowledging client
+        # Acknowledge client
         client_sock.send(b"[ACK-START]\n")
 
-        # compute delay for LED for this node
-        def task():
+        # If a previous start thread exists, stop it
+        if node_state["start_thread"] and node_state["start_thread"].is_alive():
+            print(f"[{server_type}][START] Stopping previous start thread.")
+            node_state["start_stop_event"].set()
+            node_state["start_thread"].join()
 
-            now = now_internal(node_state, server_type)  # we get the local clock
-            # We then compute delay before making led blink
+        # Create a new Event for the new thread
+        stop_event = threading.Event()
+        node_state["start_stop_event"] = stop_event
+
+        # Define the new task
+        def task():
+            now = now_internal(node_state, server_type)
+            if isinstance(now, int) and now == -1:
+                print(f"[{server_type}][LED] Cannot run: local clock not initialized.")
+                return
+
             delay = (node_state['start_time'] - now).total_seconds()
 
-            # Note: maybe this condition should be removed.
-            # what if a raspberry glitch mid run ? we won't be able to set it up
-            if delay < 0:  # Error if start timestamp has expired
-                print(f"[LED] Invalid start time: timestamp already expired.")
-                return 1
+            if delay < 0:
+                print(f"[{server_type}][LED] Invalid start time: timestamp already expired.")
+                return
 
-            # Before waiting for LEd blink,
-            # we have to wait for run to start
             if delay > 0:
-                print(f"[LED] Waiting before run start: {delay:.2f} seconds.")
-                time.sleep(delay)
+                print(f"[{server_type}][LED] Waiting before run start: {delay:.2f}s")
+                # Wait with ability to stop early
+                if stop_event.wait(timeout=delay):
+                    print(f"[{server_type}][LED] Start canceled before beginning wait.")
+                    return
 
-            # Wait to blink LED
+            # proportionnel au node_distance
             led_delay = node_state["node_distance"] * node_state['target_duration'] / node_state["distance_total"]
             print(f"[{server_type}][LED] Attente proportionnelle à la distance du noeud: {led_delay:.2f}s")
-            time.sleep(led_delay)
+            if stop_event.wait(timeout=led_delay):
+                print(f"[{server_type}][LED] Start canceled during proportional wait.")
+                return
 
-            run_led_logic()
+            run_led_logic(server_type)
 
-        threading.Thread(target=task, daemon=True).start()
+        # Launch the new thread
+        t = threading.Thread(target=task, daemon=True)
+        node_state["start_thread"] = t
+        t.start()
 
     except Exception as e:
         print(f"[{server_type}][ERROR START]: {e}")
