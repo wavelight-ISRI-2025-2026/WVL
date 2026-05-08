@@ -1,0 +1,13 @@
+[Unit]
+Description=Wavelight service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/wavelight/.venv/bin/python3 -m app.wavelight.wavelight
+WorkingDirectory=/opt/wavelight
+Restart=always
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
