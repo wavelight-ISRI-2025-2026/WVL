@@ -1,6 +1,7 @@
 import threading
 import time
 
+from app.wavelight.leds import leds
 from app.wavelight.capteur import healthcheck
 from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, local_server
 
@@ -20,6 +21,10 @@ node_state = {
 def main():
 
     print("[WAVELIGHT] Starting system")
+
+    # Clearing previous execution, if required
+    # We turn both LEDs off, in case they are on
+    leds.turn_leds_off()
 
     # Do one-shot healthcheck
     healthcheck.healthcheck()
