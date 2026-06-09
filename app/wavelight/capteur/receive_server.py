@@ -4,7 +4,7 @@ import threading
 import time
 import re
 
-from app.wavelight.leds.leds import wavelight_blink_leds, turn_leds_off
+from app.wavelight.leds.leds import wavelight_blink_leds, turn_leds_off, get_on_time_phase_duration
 
 # Return elapsed time since given clock start time (placeholder)
 def now_internal(node_state, server_type):
@@ -18,12 +18,6 @@ def now_internal(node_state, server_type):
     elapsed = datetime.now(timezone.utc) - node_state['start_real_time']
     return node_state['time_ref'] + elapsed
 
-# placeholder for leds. replace using ./led/led.py
-def run_led_logic(server_type):
-    print(f"[{server_type}][LED] ON")
-    time.sleep(1)
-    print(f"[{server_type}][LED] OFF")
-
 # Launch proper wavelight parsing, depending of protocol header
 # TODO: replace for JSON instead of regex ???
 def parse_wvl_protocol(msg, client_sock, node_state, server_type):
@@ -32,7 +26,7 @@ def parse_wvl_protocol(msg, client_sock, node_state, server_type):
     parts = re.findall(r"\[(.*?)\]", msg)
     if not parts:
         print(f"[{server_type}] No parts found in received message: '{msg}'")
-        client_sock.send(b"[ERROR-HANDLING]\n")
+        # client_sock.send(b"[ERROR-HANDLING]\n")
         return 1
 
     # Extracting header 
@@ -41,7 +35,6 @@ def parse_wvl_protocol(msg, client_sock, node_state, server_type):
     # Set handler parsing methods
     dispatch = {
         "wvl-config": handle_config,
-        "wvl-distance": handle_distance,
         "wvl-start": handle_start
     }
 
@@ -51,7 +44,7 @@ def parse_wvl_protocol(msg, client_sock, node_state, server_type):
     # Include guard to prevent unknown header
     if handler is None:
         print(f"[{server_type}] Unknown header received: '{header}'")
-        client_sock.send(b"[ERROR-HANDLING]\n")
+        # client_sock.send(b"[ERROR-HANDLING]\n")
         return 1
 
     # Running header parsing method
@@ -72,48 +65,30 @@ def handle_config(parts, client_sock, node_state, server_type):
             distance_total *= 1000  # conversion km -> m 
         node_state["distance_total"] = distance_total
 
-        # Get desired local clock
-        node_state['time_ref'] = datetime.fromisoformat(parts[3])
-        node_state['start_real_time'] = datetime.now(timezone.utc)
-
-        # Output given informations
-        print(f"[{server_type}][CONFIG] distance_total={node_state['distance_total']} m")
-        print(f"[{server_type}][CONFIG] local_clock={node_state['time_ref']} m")
-
-        # Acknowledging client that distance has been set successfully
-        client_sock.send(b"[ACK-CONFIG]\n")
-
-    # An error occured during parsing
-    except Exception as e:
-        print(f"[{server_type}][ERROR CONFIG]: {e}")
-        client_sock.send(b"[ERROR-CONFIG]\n")
-        return 1
-
-# Parsing [WVL-distance]
-def handle_distance(parts, client_sock, node_state, server_type):
-
-    try:
-
-        # KM ou meters
-        unit = parts[1].lower()
-
         # Get total distance, convertion in meters if required
-        node_distance = float(parts[2])
+        node_distance = float(parts[3])
         if unit == "km":
             node_distance *= 1000
         node_state["node_distance"] = node_distance
 
-        # Output given informations
-        print(f"[{server_type}][DISTANCE] node_distance={node_state['node_distance']} m")
+        # Get desired local clock
+        node_state['time_ref'] = datetime.strptime(parts[4], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        node_state['start_real_time'] = datetime.now(timezone.utc)
+
+        # Output given informations
+        print(f"[{server_type}][CONFIG] distance_total={node_state['distance_total']} m")
+        print(f"[{server_type}][CONFIG] node_distance={node_state['node_distance']} m")
+        print(f"[{server_type}][CONFIG] local_clock={node_state['time_ref']} m")
 
         # Acknowledging client that distance has been set successfully
-        client_sock.send(b"[ACK-DISTANCE]\n")
+        # client_sock.send(b"[ACK-CONFIG]\n")
 
     # An error occured during parsing
     except Exception as e:
-        print(f"[{server_type}][ERROR DISTANCE]: {e}")
-        client_sock.send(b"[ERROR-DISTANCE]\n")
+        print(f"[{server_type}][ERROR CONFIG]: {e}")
+        # client_sock.send(b"[ERROR-CONFIG]\n")
         return 1
+
 
 # Parsing [WVL-start]
 def handle_start(parts, client_sock, node_state, server_type):
@@ -121,26 +96,22 @@ def handle_start(parts, client_sock, node_state, server_type):
     # Include guards
     if node_state["distance_total"] is None:
         print(f"[{server_type}][START] Total distance not defined. Please configure it using [WVL-config] header.")
-        client_sock.send(b"[ERROR-START]\n")
-        return 1
-        
-    if node_state["node_distance"] is None:
-        print(f"[{server_type}][START] Local distance not defined. Please configure it using [WVL-distance] header.")
-        client_sock.send(b"[ERROR-START]\n")
+        # client_sock.send(b"[ERROR-START]\n")
         return 1
 
     try:
-        # Get run start timestamp
-        node_state["start_time"] = datetime.fromisoformat(parts[1])
 
         # Desired time to complete the run
-        node_state["target_duration"] = float(parts[2])
+        node_state["target_duration"] = float(parts[1])
+
+        # Get run start timestamp
+        node_state["start_time"] = datetime.strptime(parts[2], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
 
         print(f"[{server_type}][START] start_time={node_state['start_time']}")
         print(f"[{server_type}][START] target_duration={node_state['target_duration']}")
 
         # Acknowledge client
-        client_sock.send(b"[ACK-START]\n")
+        # client_sock.send(b"[ACK-START]\n")
 
         # If a previous start thread exists, stop it
         if node_state["start_thread"] and node_state["start_thread"].is_alive():
@@ -159,27 +130,33 @@ def handle_start(parts, client_sock, node_state, server_type):
                 print(f"[{server_type}][LED] Cannot run: local clock not initialized.")
                 return
 
-            delay = (node_state['start_time'] - now).total_seconds()
-
-            if delay < 0:
-                print(f"[{server_type}][LED] Invalid start time: timestamp already expired.")
-                client_sock.send(b"[ERROR-START]\n")
-                return
-
-            if delay > 0:
-                print(f"[{server_type}][LED] Waiting before run start: {delay:.2f}s")
-                # Wait with ability to stop early
-                if stop_event.wait(timeout=delay):
-                    print(f"[{server_type}][LED] Start canceled before beginning wait.")
-                    return
-
             # Course officialy started. We turn both leds off
             turn_leds_off()
 
-            # Proportional waiting, based on node distance from start point
+            # Theoretical time to reach this point in the race
             led_delay = node_state["node_distance"] * node_state['target_duration'] / node_state["distance_total"]
-            print(f"[{server_type}][LED] Proportional waiting, based on node distance from start point: {led_delay:.2f}s")
-            if stop_event.wait(timeout=led_delay):
+
+            # Adding offset so that transition between the two LED
+            # is THE best moment for the pacing. Basically we start
+            # LEDs a bit sooner to be in the right pace when blinking
+            ideal_offset = get_on_time_phase_duration()
+
+            # In case the race already started --- we
+            # have to remove a bit of waiting time else 0 removed delay
+            elapsed_since_start = (now - node_state["start_time"]).total_seconds()
+            elapsed_since_start = max(0, elapsed_since_start)  # Ignoring advance
+
+            # We can compute the final waiting time
+            # before blinking LEDs on this node.
+            final_wait = max(0, led_delay - ideal_offset - elapsed_since_start)
+
+            print(f"[{server_type}][LED] Raw delay: {led_delay:.2f}s")
+            print(f"[{server_type}][LED] Offset: {ideal_offset:.2f}s")
+            print(f"[{server_type}][LED] Elapsed: {elapsed_since_start:.2f}s")
+            print(f"[{server_type}][LED] Final delay: {final_wait:.2f}s")
+
+            print(f"[{server_type}][LED] Proportional waiting, based on node distance from start point: {final_wait:.2f}s")
+            if stop_event.wait(timeout=final_wait):
                 print(f"[{server_type}][LED] Start canceled during proportional wait.")
                 return
 
@@ -193,43 +170,69 @@ def handle_start(parts, client_sock, node_state, server_type):
 
     except Exception as e:
         print(f"[{server_type}][ERROR START]: {e}")
-        client_sock.send(b"[ERROR-START]\n")
+        # client_sock.send(b"[ERROR-START]\n")
         return 1
 
 # Using appinventor app
 def bluetooth_server(node_state):
-    
+
     server_type="BLUETOOTH"
+
     server_sock = socket.socket(
         socket.AF_BLUETOOTH,
         socket.SOCK_STREAM,
         socket.BTPROTO_RFCOMM
     )
+
     server_sock.bind(("00:00:00:00:00:00", 1))
     server_sock.listen(1)
 
     print(f"[{server_type}] Server ready.")
 
-    client_sock, client_info = server_sock.accept()
-    print(f"[{server_type}] Client connected : {client_info}.")
+    try:
 
-    buffer = ""
+        while True:
 
-    while True:
-        data = client_sock.recv(1024)
-        if not data:
-            break
+            client_sock, client_info = server_sock.accept()
+            print(f"[{server_type}] Client connected : {client_info}.")
 
-        buffer += data.decode("utf-8", errors="ignore")
+            try:
 
-        while "\n" in buffer:
-            line, buffer = buffer.split("\n", 1)
-            line = line.strip()
+                while True:
 
-            if line:
-                parse_wvl_protocol(line, client_sock, node_state, server_type)
+                    data = client_sock.recv(1024)
 
-    client_sock.close()
+                    if not data:
+                        print(f"[{server_type}] Client disconnected.")
+                        break
+
+                    msg = data.decode("utf-8").strip()
+                    print(f"[{server_type}] Received message: {msg}")
+
+                    parse_wvl_protocol(msg, client_sock, node_state, server_type)
+
+            except ConnectionResetError:
+                print("Client déconnecté brutalement.")
+
+            except Exception as e:
+                print(f"Erreur avec ce client : {e}")
+
+            finally:
+                try:
+                    client_sock.close()
+                except Exception:
+                    pass
+
+                print("Connexion fermée. Retour à l'attente d'un nouvel appareil.")
+
+    except KeyboardInterrupt:
+        print("\nArrêt manuel du script.")
+
+    finally:
+        try:
+            server_sock.close()
+        except Exception:
+            pass
 
 # TODO: lora
 # Using master raspberry pi
@@ -238,12 +241,12 @@ def lora_server(node_state):
 
 # use command 'nc 127.0.0.1 9999' to test locally without bluetooth.
 # example of usage:
-# [WVL-config][m][1000][2026-05-08T16:20:00+00:00]
-# [WVL-distance][m][500]
-# [WVL-start][2026-05-08T16:20:30+00:00][120]
+# [WVL-config][m][1000][500][2026-05-08 16:20:00]
+# [WVL-start][120][2026-05-08 16:20:30]
 def local_server(node_state):
 
     server_type="LOCAL"
+
     server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_sock.bind(("127.0.0.1", 9999))
     server_sock.listen(1)
