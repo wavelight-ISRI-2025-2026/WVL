@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import socket
 import threading
 import time
@@ -89,15 +89,30 @@ def handle_config(parts, node_state, server_type):
 # Parsing [WVL-start]
 def handle_start(parts, node_state, server_type):
 
-    # Include guards
-    if node_state["distance_total"] is None:
-        print(f"[{server_type}][START] Total distance not defined. Please configure it using [WVL-config] header.")
-        return 1
+    required_keys = ["distance_total", "node_distance", "time_ref", "start_real_time"]
+
+    for key in required_keys:
+        if node_state[key] is None:
+            print(f"[{server_type}][START] Missing config value: {key}")
+            return 1
 
     try:
 
         # Desired time to complete the run
         node_state["target_duration"] = float(parts[1])
+
+        # Check
+        if node_state["distance_total"] <= 0:
+            print(f"[{server_type}][START] distance_total must be > 0")
+            return 1
+
+        if node_state["target_duration"] <= 0:
+            print(f"[{server_type}][START] target_duration must be > 0")
+            return 1
+
+        if node_state["node_distance"] < 0 or node_state["node_distance"] > node_state["distance_total"]:
+            print(f"[{server_type}][START] node_distance invalid")
+            return 1
 
         # Get run start timestamp
         node_state["start_time"] = datetime.strptime(parts[2], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
@@ -115,44 +130,51 @@ def handle_start(parts, node_state, server_type):
         stop_event = threading.Event()
         node_state["start_stop_event"] = stop_event
 
-        # Define the new task
         def task():
-            now = now_internal(node_state, server_type)
-            if isinstance(now, int) and now == -1:
-                print(f"[{server_type}][LED] Cannot run: local clock not initialized.")
-                return
-
-            # Course officialy started. We turn both leds off
+            # Course officiellement démarrée : on éteint les LEDs au départ
             turn_leds_off()
 
-            # Theoretical time to reach this point in the race
-            led_delay = node_state["node_distance"] * node_state['target_duration'] / node_state["distance_total"]
+            # Temps théorique, en secondes, pour atteindre ce nœud
+            led_delay = (
+                node_state["node_distance"]
+                * node_state["target_duration"]
+                / node_state["distance_total"]
+            )
 
-            # Adding offset so that transition between the two LED
-            # is THE best moment for the pacing. Basically we start
-            # LEDs a bit sooner to be in the right pace when blinking
-            ideal_offset = get_on_time_phase_duration()
+            # Instant exact où le coureur doit arriver à ce nœud
+            target_passage_time = node_state["start_time"] + timedelta(seconds=led_delay)
 
-            # In case the race already started --- we
-            # have to remove a bit of waiting time else 0 removed delay
-            elapsed_since_start = (now - node_state["start_time"]).total_seconds()
-            elapsed_since_start = max(0, elapsed_since_start)  # Ignoring advance
+            # Durée entre le début de la séquence LED et le passage vert -> rouge
+            green_phase_duration = get_on_time_phase_duration()
 
-            # We can compute the final waiting time
-            # before blinking LEDs on this node.
-            final_wait = max(0, led_delay - ideal_offset - elapsed_since_start)
+            # Instant exact où il faut lancer la séquence LED
+            led_start_time = target_passage_time - timedelta(seconds=green_phase_duration)
 
-            print(f"[{server_type}][LED] Raw delay: {led_delay:.2f}s")
-            print(f"[{server_type}][LED] Offset: {ideal_offset:.2f}s")
-            print(f"[{server_type}][LED] Elapsed: {elapsed_since_start:.2f}s")
-            print(f"[{server_type}][LED] Final delay: {final_wait:.2f}s")
+            print(f"[{server_type}][LED] Passage attendu : {target_passage_time}")
+            print(f"[{server_type}][LED] Début séquence LED : {led_start_time}")
+            print(f"[{server_type}][LED] Durée phase verte : {green_phase_duration:.2f}s")
 
-            print(f"[{server_type}][LED] Proportional waiting, based on node distance from start point: {final_wait:.2f}s")
-            if stop_event.wait(timeout=final_wait):
-                print(f"[{server_type}][LED] Start canceled during proportional wait.")
+            while not stop_event.is_set():
+                now = now_internal(node_state, server_type)
+
+                if isinstance(now, int) and now == -1:
+                    print(f"[{server_type}][LED] Cannot run: local clock not initialized.")
+                    return
+
+                # On compare l'horloge locale à l'instant absolu prévu
+                if now >= led_start_time:
+                    break
+
+                time.sleep(0.05)
+
+            if stop_event.is_set():
+                print(f"[{server_type}][LED] Start canceled before LED sequence.")
                 return
 
-            # Timeout reached. Now blinking leds...
+            print(f"[{server_type}][LED] Starting LED sequence now.")
+
+            # La transition vert -> rouge arrivera exactement à target_passage_time,
+            # car on a démarré la séquence avec l'avance green_phase_duration.
             wavelight_blink_leds()
 
         # Launch the new thread
@@ -269,33 +291,43 @@ def lora_server(node_state):
 # example of usage:
 # [WVL-config][m][1000][500][2026-05-08 16:20:00]
 # [WVL-start][120][2026-05-08 16:20:30]
-def local_server(node_state):
+# def local_server(node_state):
 
-    server_type="LOCAL"
+#     server_type="LOCAL"
 
-    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_sock.bind(("127.0.0.1", 9999))
-    server_sock.listen(1)
+#     while True: 
 
-    print(f"[{server_type}] Server ready.")
+#         try: 
 
-    client_sock, client_info = server_sock.accept()
-    print(f"[{server_type}] Client connected : {client_info}.")
+#             server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#             server_sock.bind(("127.0.0.1", 9999))
+#             server_sock.listen(1)
 
-    buffer = ""
+#             print(f"[{server_type}] Server ready.")
 
-    while True:
-        data = client_sock.recv(1024)
-        if not data:
-            break
+#             client_sock, client_info = server_sock.accept()
+#             print(f"[{server_type}] Client connected : {client_info}.")
 
-        buffer += data.decode("utf-8", errors="ignore")
+#             buffer = ""
 
-        while "\n" in buffer:
-            line, buffer = buffer.split("\n", 1)
-            line = line.strip()
+#             while True:
+#                 data = client_sock.recv(1024)
+#                 if not data:
+#                     break
 
-            if line:
-                parse_wvl_protocol(line, node_state, server_type)
+#                 buffer += data.decode("utf-8", errors="ignore")
 
-    client_sock.close()
+#                 while "\n" in buffer:
+#                     line, buffer = buffer.split("\n", 1)
+#                     line = line.strip()
+
+#                     if line:
+#                         parse_wvl_protocol(line, client_sock, node_state, server_type)
+
+#             client_sock.close()
+
+#         except Exception as e:
+
+#             print(f"[{server_type}][ERROR]: {e}")
+#             print(f"[{server_type}] Restarting server...")
+#             continue  # Restart from 0
