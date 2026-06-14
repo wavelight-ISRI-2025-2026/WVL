@@ -14,38 +14,51 @@ END_DELAY = float(config["DEFAULT"]["END_DELAY"])
 STEPS = int(config["DEFAULT"]["STEPS"])
 FINAL_STEP_TIMEOUT = float(config["DEFAULT"]["FINAL_STEP_TIMEOUT"])
 
+
 # --- GPIO setup ---
-GPIO.setmode(GPIO.BOARD)
-GPIO.setup(PIN_LED_ON_TIME, GPIO.OUT)
-GPIO.setup(PIN_LED_IS_LATE, GPIO.OUT)
+def setup_gpio():
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(PIN_LED_ON_TIME, GPIO.OUT)
+    GPIO.setup(PIN_LED_IS_LATE, GPIO.OUT)
+
+
+setup_gpio()
+
 
 def set_led_on_time_powerstate(state: bool):
+    setup_gpio()
     GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH if state else GPIO.LOW)
 
+
 def set_led_is_late_powerstate(state: bool):
+    setup_gpio()
     GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH if state else GPIO.LOW)
 
+
 def turn_leds_off():
+    setup_gpio()
     GPIO.output(PIN_LED_ON_TIME, GPIO.LOW)
     GPIO.output(PIN_LED_IS_LATE, GPIO.LOW)
 
+
 def blink_led(target_led, final_state: bool, times: int, interval: float = 0.5):
+    setup_gpio()
 
     # LED initial state
     initial_state = GPIO.input(target_led)
-    
+
     for _ in range(times):
-        # Reversing state
         GPIO.output(target_led, not initial_state)
         time.sleep(interval)
         GPIO.output(target_led, initial_state)
         time.sleep(interval)
-    
-    # Put back to initial state
-    GPIO.output(target_led, initial_state)
+
+    GPIO.output(target_led, GPIO.HIGH if final_state else GPIO.LOW)
+
 
 def get_on_time_phase_duration():
-    # somme des délais de clignotement
+    # Somme des délais de clignotement de la LED verte
     delay_step = (START_DELAY - END_DELAY) / max(STEPS - 1, 1)
 
     current_delay = START_DELAY
@@ -55,13 +68,18 @@ def get_on_time_phase_duration():
         total += current_delay * 2  # ON + OFF
         current_delay = max(END_DELAY, current_delay - delay_step)
 
-    # ajouter la phase ON fixe
+    # Ajouter la phase ON fixe
     total += FINAL_STEP_TIMEOUT
 
     return total
 
-def wavelight_blink_leds():
+
+def wavelight_blink_leds(on_green_on=None, on_green_to_red=None):
+    setup_gpio()
+
     try:
+        green_on_notified = False
+
         # --- Phase 1 : ON_TIME accélère ---
         delay_step = (START_DELAY - END_DELAY) / max(STEPS - 1, 1)
 
@@ -69,7 +87,14 @@ def wavelight_blink_leds():
 
         for _ in range(STEPS):
             GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
+
+            if not green_on_notified:
+                green_on_notified = True
+                if on_green_on is not None:
+                    on_green_on()
+
             time.sleep(current_delay)
+
             GPIO.output(PIN_LED_ON_TIME, GPIO.LOW)
             time.sleep(current_delay)
 
@@ -79,11 +104,14 @@ def wavelight_blink_leds():
         GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
         time.sleep(FINAL_STEP_TIMEOUT)
 
-        # --- Transition ---
+        # --- Transition vert -> rouge ---
         GPIO.output(PIN_LED_ON_TIME, GPIO.LOW)
+        GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
+
+        if on_green_to_red is not None:
+            on_green_to_red()
 
         # --- IS_LATE reste allumée ---
-        GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
         time.sleep(FINAL_STEP_TIMEOUT)
 
         # --- Phase 2 : IS_LATE ralentit ---
@@ -94,6 +122,7 @@ def wavelight_blink_leds():
         for _ in range(STEPS):
             GPIO.output(PIN_LED_IS_LATE, GPIO.LOW)
             time.sleep(current_delay)
+
             GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
             time.sleep(current_delay)
 
@@ -104,5 +133,9 @@ def wavelight_blink_leds():
 
     except KeyboardInterrupt:
         print("\nManual arrest.")
-    finally:
-        GPIO.cleanup()
+        turn_leds_off()
+
+
+def cleanup_gpio():
+    turn_leds_off()
+    GPIO.cleanup()
