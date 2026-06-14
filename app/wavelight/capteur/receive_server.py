@@ -3,6 +3,7 @@ import socket
 import threading
 import time
 import re
+import serial
 
 from app.wavelight.leds.leds import wavelight_blink_leds, turn_leds_off, get_on_time_phase_duration
 
@@ -20,7 +21,7 @@ def now_internal(node_state, server_type):
 
 # Launch proper wavelight parsing, depending of protocol header
 # TODO: replace for JSON instead of regex ???
-def parse_wvl_protocol(msg, client_sock, node_state, server_type):
+def parse_wvl_protocol(msg, node_state, server_type):
 
     # Gathering number of parts (a part is between '[...]')
     parts = re.findall(r"\[(.*?)\]", msg)
@@ -44,15 +45,14 @@ def parse_wvl_protocol(msg, client_sock, node_state, server_type):
     # Include guard to prevent unknown header
     if handler is None:
         print(f"[{server_type}] Unknown header received: '{header}'")
-        # client_sock.send(b"[ERROR-HANDLING]\n")
         return 1
 
     # Running header parsing method
     if handler:
-        handler(parts, client_sock, node_state, server_type)
+        handler(parts, node_state, server_type)
 
 # Parsing [WVL-config]
-def handle_config(parts, client_sock, node_state, server_type):
+def handle_config(parts, node_state, server_type):
 
     try:
 
@@ -80,23 +80,18 @@ def handle_config(parts, client_sock, node_state, server_type):
         print(f"[{server_type}][CONFIG] node_distance={node_state['node_distance']} m")
         print(f"[{server_type}][CONFIG] local_clock={node_state['time_ref']} m")
 
-        # Acknowledging client that distance has been set successfully
-        # client_sock.send(b"[ACK-CONFIG]\n")
-
     # An error occured during parsing
     except Exception as e:
         print(f"[{server_type}][ERROR CONFIG]: {e}")
-        # client_sock.send(b"[ERROR-CONFIG]\n")
         return 1
 
 
 # Parsing [WVL-start]
-def handle_start(parts, client_sock, node_state, server_type):
+def handle_start(parts, node_state, server_type):
 
     # Include guards
     if node_state["distance_total"] is None:
         print(f"[{server_type}][START] Total distance not defined. Please configure it using [WVL-config] header.")
-        # client_sock.send(b"[ERROR-START]\n")
         return 1
 
     try:
@@ -109,9 +104,6 @@ def handle_start(parts, client_sock, node_state, server_type):
 
         print(f"[{server_type}][START] start_time={node_state['start_time']}")
         print(f"[{server_type}][START] target_duration={node_state['target_duration']}")
-
-        # Acknowledge client
-        # client_sock.send(b"[ACK-START]\n")
 
         # If a previous start thread exists, stop it
         if node_state["start_thread"] and node_state["start_thread"].is_alive():
@@ -170,7 +162,6 @@ def handle_start(parts, client_sock, node_state, server_type):
 
     except Exception as e:
         print(f"[{server_type}][ERROR START]: {e}")
-        # client_sock.send(b"[ERROR-START]\n")
         return 1
 
 # Using appinventor app
@@ -209,13 +200,13 @@ def bluetooth_server(node_state):
                     msg = data.decode("utf-8").strip()
                     print(f"[{server_type}] Received message: {msg}")
 
-                    parse_wvl_protocol(msg, client_sock, node_state, server_type)
+                    parse_wvl_protocol(msg, node_state, server_type)
 
             except ConnectionResetError:
-                print("Client déconnecté brutalement.")
+                print(f"[{server_type}] Client disconnected abruptly.")
 
             except Exception as e:
-                print(f"Erreur avec ce client : {e}")
+                print(f"[{server_type}] Error with client : {e}")
 
             finally:
                 try:
@@ -223,10 +214,10 @@ def bluetooth_server(node_state):
                 except Exception:
                     pass
 
-                print("Connexion fermée. Retour à l'attente d'un nouvel appareil.")
+                print(f"[{server_type}] Connection closed. Waiting for new connection...")
 
     except KeyboardInterrupt:
-        print("\nArrêt manuel du script.")
+        print(f"\n[{server_type}] Manual stop initiated.")
 
     finally:
         try:
@@ -234,10 +225,29 @@ def bluetooth_server(node_state):
         except Exception:
             pass
 
-# TODO: lora
 # Using master raspberry pi
 def lora_server(node_state):
-    print("[LORA] Server not implemented yet.")
+
+    server_type="LoRa"
+
+    # TODO: remove hardcoded ttyUSB1 and
+    # baudrate, read from conf file instead
+    ser = serial.Serial("/dev/ttyUSB1", 9600, timeout=1)
+
+    print(f"[{server_type}] Server ready.")
+
+    while True:
+
+        data = ser.readline().decode(errors="ignore").strip()
+
+        if not data:
+            print(f"[{server_type}] Message received but no data.")
+            continue
+
+        msg = data.decode("utf-8").strip()
+        print(f"[{server_type}] Received message: {msg}")
+
+        parse_wvl_protocol(msg, node_state, server_type)
 
 # use command 'nc 127.0.0.1 9999' to test locally without bluetooth.
 # example of usage:
@@ -270,6 +280,6 @@ def local_server(node_state):
             line = line.strip()
 
             if line:
-                parse_wvl_protocol(line, client_sock, node_state, server_type)
+                parse_wvl_protocol(line, node_state, server_type)
 
     client_sock.close()
