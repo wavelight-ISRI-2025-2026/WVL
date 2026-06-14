@@ -164,8 +164,24 @@ def handle_start(parts, node_state, server_type):
         print(f"[{server_type}][ERROR START]: {e}")
         return 1
 
+# Send the LoRa message
+def send_lora_message(msg, node_state, server_type):
+
+    ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+
+    # In case port take time to open...
+    time.sleep(1)
+
+    # Adding \n so that LoRa understand this is
+    # the end of the message and send it
+    ser.write((msg + "\n").encode())
+
+    rx = ser.readline().decode(errors="ignore").strip()
+    if rx:
+        print("[SENT]: ", rx)
+
 # Using appinventor app
-def bluetooth_server(node_state):
+def bluetooth_server(node_state, callback):
 
     server_type="BLUETOOTH"
 
@@ -200,7 +216,7 @@ def bluetooth_server(node_state):
                     msg = data.decode("utf-8").strip()
                     print(f"[{server_type}] Received message: {msg}")
 
-                    parse_wvl_protocol(msg, node_state, server_type)
+                    callback(msg, node_state, server_type)
 
             except ConnectionResetError:
                 print(f"[{server_type}] Client disconnected abruptly.")
@@ -230,9 +246,9 @@ def lora_server(node_state):
 
     server_type="LoRa"
 
-    # TODO: remove hardcoded ttyUSB1 and
+    # TODO: remove hardcoded ttyUSB0 and
     # baudrate, read from conf file instead
-    ser = serial.Serial("/dev/ttyUSB1", 9600, timeout=1)
+    ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
 
     print(f"[{server_type}] Server ready.")
 
