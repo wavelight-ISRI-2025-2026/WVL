@@ -11,38 +11,78 @@ ERRORS=0
 
 prepare_bluetooth_visibility() {
     echo
-    echo "[Bluetooth] Préparation de la visibilité Bluetooth..."
+    echo "[Bluetooth] Vérification de la visibilité et de l'appairage automatique..."
 
-    # On s'assure que systemd a bien pris en compte le mode -C au cas où
     sudo systemctl daemon-reload
     sudo rfkill unblock bluetooth || true
     sudo systemctl start bluetooth
-    sleep 2
+    sleep 1
 
-    # Force le contrôleur à adopter le nom configuré dans la machine (balise001)
     CURRENT_HOSTNAME=$(hostname)
-    echo "[Bluetooth] Forçage du nom de diffusion Bluetooth à : $CURRENT_HOSTNAME"
-    
+    BT_SHOW=$(sudo bluetoothctl show)
+
+    IS_DISCOVERABLE=$(echo "$BT_SHOW" | grep -q "Discoverable: yes" && echo "true" || echo "false")
+    IS_PAIRABLE=$(echo "$BT_SHOW" | grep -q "Pairable: yes" && echo "true" || echo "false")
+    CURRENT_ALIAS=$(echo "$BT_SHOW" | grep "Alias:" | awk -F': ' '{print $2}' | tr -d '\r' | xargs)
+
+    if [ "$IS_DISCOVERABLE" = "true" ] && [ "$IS_PAIRABLE" = "true" ] && [ "$CURRENT_ALIAS" = "$CURRENT_HOSTNAME" ]; then
+        ok "Bluetooth déjà configuré et visible ($CURRENT_HOSTNAME)"
+
+        if systemctl is-active --quiet bt-auto-agent.service; then
+            ok "Agent Bluetooth automatique actif"
+            return 0
+        else
+            warn "Bluetooth visible, mais agent automatique inactif. Tentative de redémarrage..."
+            sudo systemctl restart bt-auto-agent.service || true
+
+            if systemctl is-active --quiet bt-auto-agent.service; then
+                ok "Agent Bluetooth automatique relancé"
+                return 0
+            else
+                fail "Agent Bluetooth automatique indisponible"
+                return 1
+            fi
+        fi
+    fi
+
+    warn "Configuration Bluetooth incomplète ou perdue. Application du mode de secours terrain..."
+    echo "[Bluetooth] Forçage du nom à '$CURRENT_HOSTNAME' et remise en mode visible/pairable..."
+
     sudo bluetoothctl <<EOF
 power on
 system-alias $CURRENT_HOSTNAME
-agent on
-default-agent
-pairable on
 discoverable on
+pairable on
 show
 EOF
 
-    if sudo bluetoothctl show | grep -q "Discoverable: yes"; then
-        ok "Bluetooth discoverable : yes"
+    sleep 1
+
+    BT_SHOW_AFTER=$(sudo bluetoothctl show)
+
+    if echo "$BT_SHOW_AFTER" | grep -q "Discoverable: yes"; then
+        ok "Rattrapage réussi : Bluetooth discoverable"
     else
-        fail "Bluetooth n'est pas discoverable"
+        fail "Bluetooth n'est pas discoverable malgré le rattrapage"
     fi
 
-    if sudo bluetoothctl show | grep -q "Pairable: yes"; then
-        ok "Bluetooth pairable : yes"
+    if echo "$BT_SHOW_AFTER" | grep -q "Pairable: yes"; then
+        ok "Rattrapage réussi : Bluetooth pairable"
     else
-        fail "Bluetooth n'est pas pairable"
+        fail "Bluetooth n'est pas pairable malgré le rattrapage"
+    fi
+
+    if systemctl is-active --quiet bt-auto-agent.service; then
+        ok "Agent Bluetooth automatique actif"
+    else
+        warn "Agent Bluetooth automatique inactif, tentative de redémarrage..."
+        sudo systemctl restart bt-auto-agent.service || true
+
+        if systemctl is-active --quiet bt-auto-agent.service; then
+            ok "Agent Bluetooth automatique relancé"
+        else
+            fail "Agent Bluetooth automatique indisponible"
+        fi
     fi
 }
 
@@ -114,6 +154,7 @@ check_command bluetoothctl
 check_command systemctl
 check_command sdptool
 check_command rfkill
+check_command bt-agent
 
 echo
 echo "[2/8] Vérification des services..."

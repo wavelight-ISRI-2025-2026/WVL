@@ -125,14 +125,74 @@ fi
 
 sudo bluetoothctl <<EOF
 power on
-agent on
-default-agent
 pairable on
 discoverable on
 show
 EOF
 
 echo "[OK] Bluetooth configuré en pairable/discoverable"
+
+echo
+echo "[Bluetooth] Installation de l'agent d'appairage automatique NoInputNoOutput..."
+
+if command -v bt-agent >/dev/null 2>&1; then
+    echo "[OK] bt-agent disponible"
+else
+    echo "[ERROR] bt-agent introuvable. Vérifie que bluez-tools est bien installé."
+    exit 1
+fi
+
+sudo tee /usr/local/bin/bt-auto-agent.sh > /dev/null <<'EOF'
+#!/bin/bash
+
+# Agent Bluetooth automatique pour système sans écran.
+# Il maintient la Raspberry visible, pairable, et accepte les appairages en NoInputNoOutput.
+
+while true; do
+    rfkill unblock bluetooth || true
+    systemctl start bluetooth || true
+
+    bluetoothctl power on || true
+    bluetoothctl discoverable on || true
+    bluetoothctl pairable on || true
+
+    bt-agent --capability=NoInputNoOutput
+
+    # Si bt-agent s'arrête/crash, on attend un peu puis on relance.
+    sleep 2
+done
+EOF
+
+sudo chmod +x /usr/local/bin/bt-auto-agent.sh
+
+sudo tee /etc/systemd/system/bt-auto-agent.service > /dev/null <<EOF
+[Unit]
+Description=Bluetooth Auto Pairing Agent
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/bt-auto-agent.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable bt-auto-agent.service
+sudo systemctl restart bt-auto-agent.service
+sleep 1
+
+if systemctl is-active --quiet bt-auto-agent.service; then
+    echo "[OK] Agent Bluetooth automatique actif"
+else
+    echo "[ERROR] Agent Bluetooth automatique inactif"
+    exit 1
+fi
+
 echo
 echo "[Bluetooth] Vérification du profil Serial Port..."
 
