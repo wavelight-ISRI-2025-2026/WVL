@@ -7,7 +7,13 @@ import serial
 import csv
 import os
 
-from app.wavelight.leds.leds import wavelight_blink_leds, turn_leds_off, get_on_time_phase_duration
+from app.wavelight.leds.leds import (
+    wavelight_blink_leds,
+    turn_leds_off,
+    get_on_time_phase_duration,
+    blink_green_packet_ok,
+    blink_red_packet_error,
+)
 
 CSV_LOG_FILE = os.path.expanduser("~/wavelight_tests.csv")
 
@@ -67,28 +73,24 @@ def now_internal(node_state, server_type):
 # TODO: replace for JSON instead of regex ???
 def parse_wvl_protocol(msg, node_state, server_type):
 
-    # Gathering number of parts (a part is between '[...]')
     parts = re.findall(r"\[(.*?)\]", msg)
     if not parts:
         print(f"[{server_type}] No parts found in received message: '{msg}'")
-        # client_sock.send(b"[ERROR-HANDLING]\n")
+        blink_red_packet_error()
         return 1
 
-    # Extracting header 
     header = parts[0].lower()
-    
-    # Set handler parsing methods
+
     dispatch = {
         "wvl-config": handle_config,
         "wvl-start": handle_start
     }
 
-    # Get method name of the handler, given header
     handler = dispatch.get(header)
-    
-    # Include guard to prevent unknown header
+
     if handler is None:
         print(f"[{server_type}] Unknown header received: '{header}'")
+        blink_red_packet_error()
         return 1
 
     # Running header parsing method
@@ -99,45 +101,72 @@ def parse_wvl_protocol(msg, node_state, server_type):
 def handle_config(parts, node_state, server_type):
 
     try:
+        if len(parts) != 5:
+            print(f"[{server_type}][CONFIG] Invalid number of fields: expected 5, got {len(parts)}")
+            blink_red_packet_error()
+            return 1
 
-        # KM ou meters
         unit = parts[1].lower()
 
-        # Get total distance, convertion in meters if required
+        if unit not in ("m", "km"):
+            print(f"[{server_type}][CONFIG] Invalid unit: {unit}. Expected 'm' or 'km'.")
+            blink_red_packet_error()
+            return 1
+
         distance_total = float(parts[2])
-        if unit == "km":
-            distance_total *= 1000  # conversion km -> m 
-        node_state["distance_total"] = distance_total
-
-        # Get total distance, convertion in meters if required
         node_distance = float(parts[3])
-        if unit == "km":
-            node_distance *= 1000
-        node_state["node_distance"] = node_distance
 
-        # Get desired local clock
-        node_state['time_ref'] = datetime.strptime(parts[4], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-        node_state['start_real_time'] = datetime.now(timezone.utc)
+        if unit == "km":
+            distance_total *= 1000
+            node_distance *= 1000
+
+        if distance_total <= 0:
+            print(f"[{server_type}][CONFIG] distance_total must be > 0")
+            blink_red_packet_error()
+            return 1
+
+        if node_distance < 0 or node_distance > distance_total:
+            print(f"[{server_type}][CONFIG] node_distance invalid")
+            blink_red_packet_error()
+            return 1
+
+        time_ref = datetime.strptime(parts[4], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+
+        node_state["distance_total"] = distance_total
+        node_state["node_distance"] = node_distance
+        node_state["time_ref"] = time_ref
+        node_state["start_real_time"] = datetime.now(timezone.utc)
 
         # Output given informations
         print(f"[{server_type}][CONFIG] distance_total={node_state['distance_total']} m")
         print(f"[{server_type}][CONFIG] node_distance={node_state['node_distance']} m")
         print(f"[{server_type}][CONFIG] local_clock={node_state['time_ref']} m")
 
+        blink_green_packet_ok()
+        return 0
+
     # An error occured during parsing
     except Exception as e:
         print(f"[{server_type}][ERROR CONFIG]: {e}")
+        blink_red_packet_error()
         return 1
 
 
 # Parsing [WVL-start]
 def handle_start(parts, node_state, server_type):
 
+    if len(parts) != 3:
+        print(f"[{server_type}][START] Invalid number of fields: expected 3, got {len(parts)}")
+        blink_red_packet_error()
+        return 1
+
+    # Include guards
     required_keys = ["distance_total", "node_distance", "time_ref", "start_real_time"]
 
     for key in required_keys:
         if node_state[key] is None:
             print(f"[{server_type}][START] Missing config value: {key}")
+            blink_red_packet_error()
             return 1
 
     try:
@@ -148,14 +177,17 @@ def handle_start(parts, node_state, server_type):
         # Check
         if node_state["distance_total"] <= 0:
             print(f"[{server_type}][START] distance_total must be > 0")
+            blink_red_packet_error()
             return 1
 
         if node_state["target_duration"] <= 0:
             print(f"[{server_type}][START] target_duration must be > 0")
+            blink_red_packet_error()
             return 1
 
         if node_state["node_distance"] < 0 or node_state["node_distance"] > node_state["distance_total"]:
             print(f"[{server_type}][START] node_distance invalid")
+            blink_red_packet_error()
             return 1
 
         # Get run start timestamp
@@ -163,6 +195,8 @@ def handle_start(parts, node_state, server_type):
 
         print(f"[{server_type}][START] start_time={node_state['start_time']}")
         print(f"[{server_type}][START] target_duration={node_state['target_duration']}")
+
+        blink_green_packet_ok()
 
         # If a previous start thread exists, stop it
         if node_state["start_thread"] and node_state["start_thread"].is_alive():
@@ -228,7 +262,7 @@ def handle_start(parts, node_state, server_type):
                 if now >= led_start_time:
                     break
 
-                time.sleep  (0.05)
+                time.sleep(0.05)
 
             if stop_event.is_set():
                 print(f"[{server_type}][LED] Start canceled before LED sequence.")
@@ -262,8 +296,11 @@ def handle_start(parts, node_state, server_type):
         node_state["start_thread"] = t
         t.start()
 
+        return 0
+
     except Exception as e:
         print(f"[{server_type}][ERROR START]: {e}")
+        blink_red_packet_error()
         return 1
 
 # Send the LoRa message

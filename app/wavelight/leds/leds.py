@@ -56,6 +56,50 @@ def blink_led(target_led, final_state: bool, times: int, interval: float = 0.5):
 
     GPIO.output(target_led, GPIO.HIGH if final_state else GPIO.LOW)
 
+def blink_green_packet_ok(times: int = 2, interval: float = 0.2):
+    """
+    Indique qu'un paquet reçu est valide.
+    La LED verte clignote 2 fois, puis les deux LEDs reviennent allumées.
+    """
+    setup_gpio()
+
+    # État prêt : les deux LEDs sont normalement allumées
+    GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
+    GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
+
+    blink_led(
+        target_led=PIN_LED_ON_TIME,
+        final_state=True,
+        times=times,
+        interval=interval
+    )
+
+    # Retour état prêt
+    GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
+    GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
+
+
+def blink_red_packet_error(times: int = 2, interval: float = 0.2):
+    """
+    Indique qu'un paquet reçu est invalide.
+    La LED rouge clignote 2 fois, puis les deux LEDs reviennent allumées.
+    """
+    setup_gpio()
+
+    # État prêt : les deux LEDs sont normalement allumées
+    GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
+    GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
+
+    blink_led(
+        target_led=PIN_LED_IS_LATE,
+        final_state=True,
+        times=times,
+        interval=interval
+    )
+
+    # Retour état prêt
+    GPIO.output(PIN_LED_ON_TIME, GPIO.HIGH)
+    GPIO.output(PIN_LED_IS_LATE, GPIO.HIGH)
 
 def get_on_time_phase_duration():
     # Somme des délais de clignotement de la LED verte
