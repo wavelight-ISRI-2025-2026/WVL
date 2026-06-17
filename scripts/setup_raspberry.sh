@@ -212,6 +212,25 @@ echo "[OK] Groupes ajoutés à $USER_NAME"
 echo "[INFO] Redémarrage nécessaire pour appliquer les groupes."
 
 echo
+echo "[Sécurité] Configuration des privilèges sudo sans mot de passe pour $USER_NAME..."
+
+SUDOERS_FILE="/etc/sudoers.d/wavelight-nopasswd"
+
+sudo tee "$SUDOERS_FILE" > /dev/null <<EOF
+$USER_NAME ALL=(ALL) NOPASSWD: ALL
+EOF
+
+sudo chmod 0440 "$SUDOERS_FILE"
+
+if sudo visudo -cf "$SUDOERS_FILE" && sudo visudo -c; then
+    echo "[OK] Privilèges sudo sans mot de passe validés et actifs pour $USER_NAME."
+else
+    echo "[ERROR] Erreur de syntaxe détectée dans la configuration sudo, suppression par sécurité."
+    sudo rm -f "$SUDOERS_FILE"
+    exit 1
+fi
+
+echo
 echo "[6/8] Vérification du dossier projet..."
 if [ ! -d "$PROJECT_DIR" ]; then
     echo "[ERROR] Le dossier projet n'existe pas : $PROJECT_DIR"
