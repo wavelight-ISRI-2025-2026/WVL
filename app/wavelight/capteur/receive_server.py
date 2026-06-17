@@ -306,18 +306,34 @@ def handle_start(parts, node_state, server_type):
 # Send the LoRa message
 def send_lora_message(msg, node_state, server_type):
 
-    ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+    while True:
+        try:
+            ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+            break  # Exit loop if successful
+        except serial.SerialException as e:
+            print(f"[{server_type}] Error opening serial port: {e}")
+            print(f"[{server_type}] Retrying in 5 seconds...")
+            time.sleep(5)
 
-    # In case port take time to open...
-    time.sleep(1)
+    while True:
+        try:
+            # In case port takes time to open...
+            time.sleep(1)
 
-    # Adding \n so that LoRa understand this is
-    # the end of the message and send it
-    ser.write((msg + "\n").encode())
+            # Adding \n so that LoRa understands this is
+            # the end of the message and sends it
+            ser.write((msg + "\n").encode())
 
-    rx = ser.readline().decode(errors="ignore").strip()
-    if rx:
-        print("[SENT]: ", rx)
+            rx = ser.readline().decode(errors="ignore").strip()
+            if rx:
+                print("[SENT]: ", rx)
+            break  # Exit loop after successful send
+
+        except serial.SerialException as e:
+            print(f"[{server_type}] Serial port error: {e}")
+            print(f"[{server_type}] USB0 disconnected. Restarting...")
+            ser.close()
+            return send_lora_message(msg, node_state, server_type)
 
 # Using appinventor app
 def bluetooth_server(node_state, callback):
@@ -383,26 +399,37 @@ def bluetooth_server(node_state, callback):
 # Using master raspberry pi
 def lora_server(node_state):
 
-    server_type="LoRa"
+    server_type = "LoRa"
 
-    # TODO: remove hardcoded ttyUSB0 and
-    # baudrate, read from conf file instead
-    ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+    while True:
+        try:
+            ser = serial.Serial("/dev/ttyUSB0", 9600, timeout=1)
+            print(f"[{server_type}] Serial port opened successfully.")
+            break  # Exit loop if successful
+        except serial.SerialException as e:
+            print(f"[{server_type}] Error opening serial port: {e}")
+            print(f"[{server_type}] USB0 disconnected. Retrying...")
+            time.sleep(5)
 
     print(f"[{server_type}] Server ready.")
 
     while True:
+        try:
+            data = ser.readline().decode(errors="ignore").strip()
 
-        data = ser.readline().decode(errors="ignore").strip()
+            if not data:
+                continue
 
-        if not data:
-            print(f"[{server_type}] Message received but no data.")
-            continue
+            msg = data.strip()
+            print(f"[{server_type}] Received message: {msg}")
 
-        msg = data.decode("utf-8").strip()
-        print(f"[{server_type}] Received message: {msg}")
+            parse_wvl_protocol(msg, node_state, server_type)
 
-        parse_wvl_protocol(msg, node_state, server_type)
+        except serial.SerialException as e:
+            print(f"[{server_type}] Serial port error: {e}")
+            print(f"[{server_type}] USB0 disconnected. Restarting server...")
+            ser.close()
+            return lora_server(node_state)
 
 # use command 'nc 127.0.0.1 9999' to test locally without bluetooth.
 # example of usage:

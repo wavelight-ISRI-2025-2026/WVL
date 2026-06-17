@@ -4,7 +4,7 @@ from pathlib import Path
 
 from app.wavelight.leds import leds
 from app.wavelight.capteur import healthcheck
-from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, local_server, send_lora_message, parse_wvl_protocol
+from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, send_lora_message, parse_wvl_protocol
 
 # Where the node store locally sent data
 # This is set here so that thread share the same variables.
