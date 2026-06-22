@@ -1,9 +1,10 @@
 import threading
 import time
+from pathlib import Path
 
 from app.wavelight.leds import leds
 from app.wavelight.capteur import healthcheck
-from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, local_server
+from app.wavelight.capteur.receive_server import bluetooth_server, lora_server, send_lora_message, parse_wvl_protocol
 
 # Where the node store locally sent data
 # This is set here so that thread share the same variables.
@@ -19,7 +20,6 @@ node_state = {
 }
 
 def main():
-
     print("[WAVELIGHT] Starting system")
 
     # Clearing previous execution, if required
@@ -29,21 +29,38 @@ def main():
     # Do one-shot healthcheck
     healthcheck.healthcheck()
 
-    # A raspberry can receive data:
-    #
-    # - using bluetooth
-    # - using lora
-    # - locally at 127.0.0.1:9999
+    # We are either master or slave
+    # 1 - A master can only send LoRa messages
+    # 2 - Slaves can receives bluetooth and LoRa messages
+    # Status is determined by the existance of '/master' file.
 
-    # Thread for bluetooth, LoRa and local
-    # We pass node_state here so that every thread share the same variables.
-    threading.Thread(target=lora_server, args=(node_state,), daemon=True).start()
-    threading.Thread(target=local_server, args=(node_state,), daemon=True).start()
-    threading.Thread(target=bluetooth_server, args=(node_state,), daemon=True).start()
+    if Path("/master").exists():
+
+        # Only accept bluetooth.
+        threading.Thread(target=bluetooth_server, args=(node_state,send_lora_message), daemon=True).start()
+
+    else:
+
+        # A raspberry can receive data:
+        #
+        # - using bluetooth
+        # - using lora
+        # - locally at 127.0.0.1:9999
+
+        # Thread for bluetooth, LoRa and local
+        # We pass node_state here so that every thread share the same variables.
+        threading.Thread(target=lora_server, args=(node_state,), daemon=True).start()
+        # threading.Thread(target=local_server, args=(node_state,), daemon=True).start()
+        threading.Thread(target=bluetooth_server, args=(node_state,parse_wvl_protocol), daemon=True).start()
 
     # Do not stop process until CTRL+C
-    while True:
-        time.sleep(1)
+    try:
+        while True:
+            time.sleep(1)
+
+    except KeyboardInterrupt:
+        print("\n[WAVELIGHT] Stopping system")
+        leds.cleanup_gpio()
 
 
 if __name__ == "__main__":
